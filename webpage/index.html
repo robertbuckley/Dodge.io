@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang = "en">
+<head>
+    <link href="css.css" rel="stylesheet" type="text/css" />
+	<meta charset = "UTF-8">
+	<title>Game</title>
+</head>
+<body>
+<script src="https://cdn.socket.io/socket.io-1.4.5.js"></script>
+<script>
+    var WIDTH = 900, HEIGHT = 600;
+    var width = WIDTH, height = HEIGHT;
+    var canvas, ctx;
+    var players = [];
+    var balls = [];
+    var powerups = [];
+    var n = 0;;
+    var myPlayer = new Player();
+    var socket = io.connect('http://192.168.1.8:8000');
+    //var socket = io.connect('http://73.17.233.192:8000');
+    var isLoaded = false;
+    var arrow = new Image();
+    arrow.onload = new function () {
+        isLoaded = true;
+    }
+    arrow.src = "arrow.png";
+    socket.on('id', function(data){
+        myPlayer.setId(data.id);
+    });
+    socket.on('initpowers', function (data) {
+    powerups = [];
+    for (var i = 0; i < data.length ; ++i) {
+	    powerups.push(new PowerUp(data[i].x, data[i].y, data[i].color));
+    }
+    });
+    socket.on('allplayers', function(data){
+    players = [];
+    for(var i = 0; i < data.length;++i){
+	    players.push(new Player());
+	    players[players.length - 1].setX(data[i].x);
+	    players[players.length - 1].setY(data[i].y);
+        players[players.length - 1].setName(data[i].name);
+	    players[players.length - 1].setScore(data[i].score);
+	    players[players.length - 1].setId(data[i].id);
+	    if(data[i].id == myPlayer.getId()){
+		    myPlayer.setX(data[i].x);
+		    myPlayer.setY(data[i].y);
+		    myPlayer.setScore(data[i].score);
+	    }
+    }
+    });
+
+    socket.on('ballupdate', function(data){
+        balls = [data.length];
+        for(var i = 0; i < balls.length; ++i){
+	        balls[i] = new Ball(0,0,0,0);
+        }
+        for(var i = 0; i < data.length; ++i){
+	        balls[i] = new Ball(data[i].size, data[i].x, data[i].y, data[i].id);
+        }
+    });
+
+    socket.on('moveresponse', function(data){
+        myPlayer.setX(data.x);
+        myPlayer.setY(data.y);
+    });
+
+    function main(){
+        canvas = document.createElement("canvas");  
+        canvas.width = WIDTH;
+        canvas.height = HEIGHT;
+        canvas.onmouseup = function(e){
+	        origX = e.x;
+	        origY = e.y;
+	        theta = -1 * Math.atan2(origY - height / 2, origX - width / 2);
+	        socket.emit('mouseup', {theta: theta, time: new Date().getTime() - startTime, x: myPlayer.getX() - 10, y: myPlayer.getY() - 10});
+        };
+        canvas.onmousedown = function(e){
+	        startTime = new Date().getTime();
+        };
+        ctx = canvas.getContext("2d");
+        document.body.appendChild(canvas);
+        init();
+        var loop = function(){
+	        update();
+	        draw();
+	        window.requestAnimationFrame(loop,canvas);
+        };
+        window.requestAnimationFrame(loop,canvas);
+    }
+
+    function init(){
+
+    }
+
+    function update(){
+        processKeys();
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width;
+        canvas.height = height;
+        players.sort(function(a,b){
+	        if (a.getScore() < b.getScore()) {
+	            return 1;
+	        }
+	        if (a.getScore() > b.getScore()) {
+	            return -1;
+	        }
+	        return 0;
+        });
+    }
+
+    function draw(){
+        ctx.save();
+        ctx.fillStyle = "#000000";
+        ctx.scale(width / WIDTH, height / HEIGHT);
+        ctx.fillRect(0,0, WIDTH, HEIGHT);
+        for (var i = 0; i < balls.length; ++i) {
+	        balls[i].draw();
+        }
+        for (var i = 0; i < powerups.length; ++i) {
+	        powerups[i].draw();
+        }
+        for (var i = 0; i < players.length; ++i) {
+	        players[i].draw();
+        }
+        ctx.translate(WIDTH / 2, HEIGHT / 2 + 7.5);
+        var theta = Math.atan(myPlayer.getY() / myPlayer.getX());
+        if (Math.abs(myPlayer.getX()) / myPlayer.getX() <= 0) {
+            theta = theta;
+        }
+        else {
+            theta += Math.PI;
+        }
+        ctx.rotate(theta);
+        ctx.translate(-1 * (WIDTH / 2 ), -1 * (HEIGHT / 2 + 7.5));
+        ctx.drawImage(arrow, WIDTH / 2 - 5, HEIGHT / 2 + 5);
+        ctx.restore();
+        ctx.font = "20px Helvetica";
+        ctx.fillStyle = "#ffffff";
+        for(var i = 0; i < players.length; ++i){
+	        if (i <= 5) {
+	            ctx.fillText(i + 1+ ". " + players[i].getName() + " " + players[i].getScore(), 5, i * 22 + 22);
+	        }
+        }
+        ctx.restore();
+    }
+    main();
+
+    function processKeys(){
+        window.onkeydown = function(e){
+	        var key = e.keyCode ? e.keyCode : e.which;
+	        socket.emit('keydown', {key:key, uuid: myPlayer.getId()});
+        }
+        window.onkeyup = function(e){
+	        var key = e.keyCode ? e.keyCode : e.which;
+	        socket.emit('keyup', {key:key, uuid: myPlayer.getId()});
+        }
+    }
+
+    function Ball(size, xLoc, yLoc, uuid){
+        var xLoc = xLoc;
+        var yLoc = yLoc;
+        var size = size;
+        var uuid = uuid;
+        this.getX = function(){
+	        return xLoc;
+        }
+        this.getY = function(){
+	        return yLoc;
+        }
+        this.draw = function(){
+	        ctx.fillStyle = "#EE0000";
+	        ctx.fillRect(xLoc - myPlayer.getX() + WIDTH / 2, yLoc - myPlayer.getY() + HEIGHT / 2, size, size);
+        }
+    }
+
+    function PowerUp(xLoc, yLoc, color) {
+        var xLoc = xLoc;
+        var yLoc = yLoc;
+        var color = color;
+        var size = 30;
+        this.draw = function () {
+            ctx.fillStyle = color;
+            ctx.fillRect(xLoc - myPlayer.getX() + WIDTH / 2, yLoc - myPlayer.getY() + HEIGHT / 2, size, size);
+        }
+        this.getX = function () {
+            return xLoc;
+        }
+        this.getY = function () {
+            return yLoc;
+        }
+        this.getSize = function () {
+            return size;
+        }
+        this.getColor = function () {
+            return color;
+        }
+    }
+
+    function Player(){
+        var xLoc = 6;
+        var yLoc = 0;
+        var name = 'Waiting. . .';
+        var uuid;
+        var dx = 0;
+        var dy = 0;
+        var width = 50;
+        var score = 100;
+        var height = 50;
+        var SPEED = 7;
+        var w, a , s, d;
+        this.draw = function(){
+	        ctx.fillStyle = "#EE0000";
+	        ctx.fillRect(WIDTH / 2 - width / 2 + xLoc - myPlayer.getX(), HEIGHT / 2 - height / 2 + yLoc - myPlayer.getY(), width, height);
+	        ctx.font = "8px Helvetica";
+	        ctx.fillStyle = "#ffffff";
+	        ctx.fillText(score, WIDTH / 2 + xLoc - myPlayer.getX() - 6, HEIGHT / 2 + yLoc - myPlayer.getY() - 10);
+	        ctx.fillText(name, WIDTH / 2 + xLoc - myPlayer.getX() - 25, HEIGHT / 2 + yLoc - myPlayer.getY() - 30);
+        };
+        this.keyDown = function(key){
+	        if(key == 87){  //W
+                w = true;
+            }
+            if(key == 65){  //A
+                a = true;
+            }
+            if(key == 83){  //S
+                s = true;
+            }
+            if(key == 68){  //D
+		        d = true;
+            }
+        }
+        this.update = function(){
+            if(w){  //W
+                dy = -1 * SPEED;
+            }
+            if(a){  //A
+                dx = -1 * SPEED;
+            }
+            if(s){  //S
+                dy = SPEED;
+            }
+            if(d){  //D
+                dx = SPEED;
+            }
+	        xLoc += dx;
+	        yLoc += dy;
+        };
+        this.getX = function(){
+	        return xLoc;
+        }
+        this.setId = function(id){
+	        uuid = id;
+        }
+        this.getId = function(){
+	        return uuid;
+        }
+        this.getY = function(){
+	        return yLoc;
+        }
+        this.getInvis = function () {
+	        return invis;
+        }
+        this.setInvis = function (bool) {
+	        invis = bool;
+        }
+        this.setScore = function(n){
+	        score  = n;
+        }
+        this.getScore = function () {
+	        return score;
+        }
+        this.setX = function(x){
+	        xLoc = x;
+        }
+        this.getScore = function () {
+	        return score;
+        }
+        this.setY = function(y){
+	        yLoc = y;
+        }
+        this.setName = function(myName) {
+	        name = myName;
+        }
+        this.getName = function () {
+	        return name;
+        }
+        this.getHeight = function(){
+	        return height;
+        }
+        this.getWidth = function(){
+	        return width;
+        }
+        this.getDX = function(){
+	        return dx;
+        }
+        this.getDY = function(){
+	        return dy;
+        }
+    }
+</script>
+</body>
+</html>
